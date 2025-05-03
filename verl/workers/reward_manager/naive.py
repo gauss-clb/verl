@@ -29,7 +29,7 @@ class NaiveRewardManager:
         self.compute_score = compute_score or _default_compute_score
         self.reward_fn_key = reward_fn_key
 
-    def __call__(self, data: DataProto, return_dict=False):
+    def __call__(self, data: DataProto, return_dict=False, **kwargs):
         """We will expand this function gradually based on the available datasets"""
 
         # If there is rm score, we directly return rm score. Otherwise, we compute via rm_score_fn
@@ -67,6 +67,10 @@ class NaiveRewardManager:
             data_source = data_item.non_tensor_batch[self.reward_fn_key]
 
             extra_info = data_item.non_tensor_batch.get("extra_info", None)
+
+            # for rllm reward_fn
+            kwargs['eos_token'] = self.tokenizer.eos_token
+            extra_info.update(kwargs)
 
             score = self.compute_score(
                 data_source=data_source,

@@ -123,3 +123,6 @@ ENV/
 logs
 log
 outputs
+
+# rllm
+rllm/debug.sh

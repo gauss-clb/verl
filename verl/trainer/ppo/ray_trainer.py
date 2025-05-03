@@ -953,7 +953,8 @@ class RayPPOTrainer:
                         if self.config.reward_model.launch_reward_fn_async:
                             future_reward = compute_reward_async.remote(batch, self.config, self.tokenizer)
                         else:
-                            reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn)
+                            kwargs = {'is_save': self.config.trainer.is_save, 'default_local_dir': self.config.trainer.default_local_dir, 'global_steps': self.global_steps}
+                            reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn, **kwargs)
 
                     # recompute old_log_probs
                     with _timer("old_log_prob", timing_raw):
