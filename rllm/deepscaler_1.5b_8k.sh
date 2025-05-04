@@ -21,7 +21,7 @@ default_local_dir=${default_local_dir:=/home/chenliangbo/models/verl_checkpoints
 is_save=${is_save:=False}
 val_before_train=${val_before_train:=True}
 max_response_length=${max_response_length:=8192}
-reward_type=${reward_type:=default}
+# reward_type=${reward_type:=default}
 project_name=${project_name:=deepscaler}
 tp=${tp:=1}
 sp=${sp:=1}
@@ -39,6 +39,8 @@ python3 -m verl.trainer.main_ppo \
     data.train_batch_size=${train_batch_size} \
     data.max_prompt_length=1024 \
     data.max_response_length=${max_response_length} \
+    data.filter_overlong_prompts=True \
+    data.filter_overlong_prompts_workers=16 \
     actor_rollout_ref.model.path=${model_path} \
     actor_rollout_ref.actor.optim.lr=${learning_rate} \
     actor_rollout_ref.model.use_remove_padding=True \
@@ -55,6 +57,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=False \
     actor_rollout_ref.rollout.tensor_model_parallel_size=${tp} \
     actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.max_model_len=32768 \
+    actor_rollout_ref.rollout.max_num_batched_tokens=32768 \
     actor_rollout_ref.rollout.temperature=${temperature} \
     actor_rollout_ref.rollout.val_kwargs.temperature=0.6 \
     actor_rollout_ref.rollout.val_kwargs.top_p=0.95 \
@@ -78,5 +82,4 @@ python3 -m verl.trainer.main_ppo \
     trainer.default_hdfs_dir=null \
     trainer.default_local_dir=${default_local_dir} \
     trainer.total_epochs=30 \
-    trainer.is_save=${is_save} \
-    trainer.reward_type=${reward_type}
+    +trainer.is_save=${is_save}
