@@ -7,7 +7,7 @@ from typing import List, Union
 
 from .reward_types import RewardConfig, RewardFn, RewardInput, RewardOutput, RewardType
 from .math_customed import compute_score
-from ..file_utils import write_jsonl, read_text, read_jsonl
+from ..file_utils import write_jsonl, read_text, read_jsonl, get_signal
 
 import json
 import math
@@ -62,19 +62,6 @@ class MathVerifyFn(RewardFn):
         return RewardOutput(reward=self.config.incorrect_reward, is_correct=False, extra_info={"match": "false"})
 
 
-def get_signal(default_local_dir):
-    os.makedirs(default_local_dir, exist_ok=True)
-    signals = []
-    try:
-        signals_path = os.path.join(default_local_dir, 'signal.txt')
-        if not os.path.exists(signals_path):
-            open(signals_path, 'w', encoding='utf8')
-        signals = read_text(signals_path)
-    except:
-        signals = []
-    return signals
-
-
 def rllm_math_reward_fn(data_source: str, llm_solution: str, ground_truth: Union[str, List[str]], extra_info={}):
     """Evaluates mathematical solutions against ground truth answers.
 
@@ -109,9 +96,21 @@ def rllm_math_reward_fn(data_source: str, llm_solution: str, ground_truth: Union
         assert 'default_local_dir' in extra_info, 'default_local_dir must be provided'
         default_local_dir = extra_info.get('default_local_dir', '')
         global_steps = extra_info.get('global_steps', -1)
+        status = extra_info.get('status', 'train')
         signals = get_signal(default_local_dir)
-        if 'is_verify_save' in signals:
+        if 'is_verify_save' in signals and status == 'train':
             path = os.path.join(default_local_dir, 'rllm_verify.jsonl')
+            items = [{
+                "global_step": global_steps,
+                "ground_truth": ground_truth,
+                "input": "",
+                "output": llm_solution,
+                "reward": reward_response.reward,
+                "extra_info": reward_response.extra_info
+            }]
+            write_jsonl(items, path, mode='a')
+        elif 'is_validate_save' in signals and status == 'validate':
+            path = os.path.join(default_local_dir, 'rllm_aime.jsonl')
             items = [{
                 "global_step": global_steps,
                 "ground_truth": ground_truth,
