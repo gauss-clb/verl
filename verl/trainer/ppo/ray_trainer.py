@@ -842,6 +842,34 @@ class RayPPOTrainer:
         global_balance_stats = log_seqlen_unbalance(seqlen_list=global_seqlen_lst, partitions=global_partition_lst, prefix=logging_prefix)
         metrics.update(global_balance_stats)
 
+    def _dynamic_sampling(self, new_batch: DataProto):
+        # NOTE: When prompts after filtering is less than train batch size,
+        # we skip to the next generation batch
+        metric_name = self.config.algorithm.filter_groups.metric
+        if metric_name == "seq_final_reward":
+            # Turn to numpy for easier filtering
+            new_batch.non_tensor_batch["seq_final_reward"] = new_batch.batch["token_level_rewards"].sum(dim=-1).numpy()
+        elif metric_name == "seq_reward":
+            new_batch.non_tensor_batch["seq_reward"] = new_batch.batch["token_level_scores"].sum(dim=-1).numpy()
+
+        # Collect the sequence reward for each trajectory
+        prompt_uid2metric_vals = defaultdict(list)
+        for uid, metric_val in zip(new_batch.non_tensor_batch["uid"], new_batch.non_tensor_batch[metric_name]):
+            prompt_uid2metric_vals[uid].append(metric_val)
+
+        prompt_uid2metric_std = {}
+        for prompt_uid, metric_vals in prompt_uid2metric_vals.items():
+            prompt_uid2metric_std[prompt_uid] = np.std(metric_vals)
+
+        kept_prompt_uids = [uid for uid, std in prompt_uid2metric_std.items() if std > 0 or len(prompt_uid2metric_vals[uid]) == 1]
+
+        kept_traj_idxs = []
+        for idx, traj_from_prompt_uid in enumerate(new_batch.non_tensor_batch["uid"]):
+            if traj_from_prompt_uid in kept_prompt_uids:
+                kept_traj_idxs.append(idx)
+
+        return new_batch[kept_traj_idxs]
+        
     def fit(self):
         """
         The training loop of PPO.
@@ -881,6 +909,8 @@ class RayPPOTrainer:
         # we start from step 1
         self.global_steps += 1
         last_val_metrics = None
+        accumulated_batch = None
+        num_gen_batches = 0
 
         for epoch in range(self.config.trainer.total_epochs):
             for batch_dict in self.train_dataloader:
@@ -960,6 +990,26 @@ class RayPPOTrainer:
                             kwargs = {'is_save': self.config.trainer.is_save, 'default_local_dir': self.config.trainer.default_local_dir, 'global_steps': self.global_steps, 'status': 'train'}
                             reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn, **kwargs)
 
+                    
+                    if self.config.algorithm.filter_groups.enable:
+                        num_gen_batches += 1
+                        batch = self._dynamic_sampling(batch)
+                        accumulated_batch = batch if accumulated_batch is None else DataProto.concat([accumulated_batch, batch])
+                        traj_bsz = self.config.data.train_batch_size * self.config.actor_rollout_ref.rollout.n
+                        if accumulated_batch.batch.batch_size < traj_bsz:
+                            max_num_gen_batches = self.config.algorithm.filter_groups.max_num_gen_batches
+                            if max_num_gen_batches <= 0 or num_gen_batches < max_num_gen_batches:
+                                print(f"{num_gen_batches=}. Keep generating...")
+                                continue
+                            else:
+                                raise ValueError(f"{num_gen_batches=} >= {max_num_gen_batches=}." + " Generated too many. Please check if your data are too difficult." + " You could also try set max_num_gen_batches=0 to enable endless trials.")
+                        else:
+                            # Align the batch
+                            batch = accumulated_batch[:traj_bsz]
+                            metrics["training/dynamic_sampling_num_gen_batches"] = num_gen_batches
+                            accumulated_batch = None
+                            num_gen_batches = 0
+                    
                     # recompute old_log_probs
                     with _timer("old_log_prob", timing_raw):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
