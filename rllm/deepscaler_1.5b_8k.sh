@@ -78,8 +78,8 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.ref.fsdp_config.param_offload=True \
     algorithm.kl_ctrl.kl_coef=0.001 \
     algorithm.filter_groups.enable=${dynamic_sampling_enable} \
-    algorithm.filter_groups.metric=seq_final_reward \
-    algorithm.filter_groups.max_num_gen_batches=5 \
+    algorithm.filter_groups.metric=seq_reward \
+    algorithm.filter_groups.max_num_gen_batches=8 \
     trainer.critic_warmup=0 \
     trainer.logger=${logger} \
     trainer.project_name=${project_name} \
