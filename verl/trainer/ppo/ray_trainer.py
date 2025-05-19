@@ -59,6 +59,7 @@ from verl.utils.metric import (
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.torch_functional import masked_mean
 from verl.utils.tracking import ValidationGenerationsLogger
+from verl.utils.file_utils import get_signal
 from verl.workers.rollout.async_server import AsyncLLMServerManager
 
 WorkerType = Type[Worker]
@@ -990,13 +991,16 @@ class RayPPOTrainer:
                             kwargs = {'is_save': self.config.trainer.is_save, 'default_local_dir': self.config.trainer.default_local_dir, 'global_steps': self.global_steps, 'status': 'train'}
                             reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn, **kwargs)
 
-                    
+                    # apply dynamic sampling
                     if self.config.algorithm.filter_groups.enable:
+                        assert self.config.reward_model.launch_reward_fn_async == False, "Set launch_reward_fn_async=False while using dynamic sampling"
                         num_gen_batches += 1
+                        batch.batch["token_level_scores"] = reward_tensor
+                        batch.batch["token_level_rewards"] = reward_tensor
                         batch = self._dynamic_sampling(batch)
                         accumulated_batch = batch if accumulated_batch is None else DataProto.concat([accumulated_batch, batch])
                         traj_bsz = self.config.data.train_batch_size * self.config.actor_rollout_ref.rollout.n
-                        if accumulated_batch.batch.batch_size < traj_bsz:
+                        if accumulated_batch.batch.batch_size[0] < traj_bsz:
                             max_num_gen_batches = self.config.algorithm.filter_groups.max_num_gen_batches
                             if max_num_gen_batches <= 0 or num_gen_batches < max_num_gen_batches:
                                 print(f"{num_gen_batches=}. Keep generating...")
@@ -1009,7 +1013,7 @@ class RayPPOTrainer:
                             metrics["training/dynamic_sampling_num_gen_batches"] = num_gen_batches
                             accumulated_batch = None
                             num_gen_batches = 0
-                    
+
                     # recompute old_log_probs
                     with _timer("old_log_prob", timing_raw):
                         old_log_prob = self.actor_rollout_wg.compute_log_prob(batch)
@@ -1106,9 +1110,13 @@ class RayPPOTrainer:
                                 last_val_metrics = val_metrics
                         metrics.update(val_metrics)
 
-                    if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
-                        with _timer("save_checkpoint", timing_raw):
+                    with _timer("save_checkpoint", timing_raw):
+                        if self.config.trainer.save_freq > 0 and (is_last_step or self.global_steps % self.config.trainer.save_freq == 0):
                             self._save_checkpoint()
+                        else:
+                            signals = get_signal(self.config.trainer.default_local_dir)
+                            if 'is_model_save' in signals:
+                                self._save_checkpoint()
 
                 # training metrics
                 metrics.update(
