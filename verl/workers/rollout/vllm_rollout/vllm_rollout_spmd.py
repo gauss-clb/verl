@@ -31,6 +31,7 @@ import os
 from contextlib import contextmanager
 from typing import Any, Dict, List, Union
 
+import copy
 import numpy as np
 import torch
 import torch.distributed
@@ -215,6 +216,7 @@ class vLLMRollout(BaseRollout):
         position_ids = prompts.batch["position_ids"]
 
         # used to construct attention_mask
+        # print(f'====: meta_info: {prompts.meta_info}')
         eos_token_id = prompts.meta_info["eos_token_id"]
 
         batch_size = idx.size(0)
@@ -261,8 +263,11 @@ class vLLMRollout(BaseRollout):
                 "n": 1,  # if validate, already repeat in ray_trainer
             }
 
+        if "n" in prompts.meta_info:
+            kwargs["n"] = prompts.meta_info["n"]
         # users can customize different sampling_params at different run
         with self.update_sampling_params(**kwargs):
+            # print(f'===== sampling_params: {self.sampling_params}')
             outputs = self.inference_engine.generate(
                 prompts=vllm_inputs,  # because we have already convert it to prompt token id
                 sampling_params=self.sampling_params,

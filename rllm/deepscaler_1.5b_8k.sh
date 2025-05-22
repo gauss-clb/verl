@@ -31,6 +31,7 @@ learning_rate=${learning_rate:=1e-6}
 ppo_micro_batch_size=${ppo_micro_batch_size:=64}
 ppo_micro_batch_size=$((ppo_micro_batch_size * rollout_n))
 ppo_mini_batch_size=${ppo_mini_batch_size:=64}
+use_kl_loss=${use_kl_loss:=True}
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -48,7 +49,7 @@ python3 -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.ppo_micro_batch_size=${ppo_micro_batch_size} \
     actor_rollout_ref.actor.use_dynamic_bsz=True \
     actor_rollout_ref.actor.ppo_max_token_len_per_gpu=32768 \
-    actor_rollout_ref.actor.use_kl_loss=True \
+    actor_rollout_ref.actor.use_kl_loss=${use_kl_loss} \
     actor_rollout_ref.actor.kl_loss_coef=0.001 \
     actor_rollout_ref.actor.kl_loss_type=low_var_kl \
     actor_rollout_ref.actor.ulysses_sequence_parallel_size=${sp} \

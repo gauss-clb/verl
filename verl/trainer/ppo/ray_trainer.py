@@ -621,7 +621,8 @@ class RayPPOTrainer:
             test_batch = test_batch.union(test_output_gen_batch)
 
             # evaluate using reward_function
-            result = self.val_reward_fn(test_batch, return_dict=True)
+            kwargs = {'is_save': self.config.trainer.is_save, 'default_local_dir': self.config.trainer.default_local_dir, 'global_steps': getattr(self, 'global_steps', 0), 'status': 'validate'}
+            result = self.val_reward_fn(test_batch, return_dict=True, **kwargs)
             reward_tensor = result["reward_tensor"]
             scores = reward_tensor.sum(-1).cpu().tolist()
             sample_scores.extend(scores)
@@ -906,6 +907,9 @@ class RayPPOTrainer:
                 with _timer("step", timing_raw):
                     # generate a batch
                     with _timer("gen", timing_raw):
+                        # repeat gen_batch and use n=1 in rollout
+                        gen_batch = gen_batch.repeat(repeat_times=self.config.actor_rollout_ref.rollout.n, interleave=True)
+                        gen_batch.meta_info["n"] = 1
                         if not self.async_rollout_mode:
                             gen_batch_output = self.actor_rollout_wg.generate_sequences(gen_batch)
                         else:
@@ -953,7 +957,7 @@ class RayPPOTrainer:
                         if self.config.reward_model.launch_reward_fn_async:
                             future_reward = compute_reward_async.remote(batch, self.config, self.tokenizer)
                         else:
-                            kwargs = {'is_save': self.config.trainer.is_save, 'default_local_dir': self.config.trainer.default_local_dir, 'global_steps': self.global_steps}
+                            kwargs = {'is_save': self.config.trainer.is_save, 'default_local_dir': self.config.trainer.default_local_dir, 'global_steps': self.global_steps, 'status': 'train'}
                             reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn, **kwargs)
 
                     # recompute old_log_probs
