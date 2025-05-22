@@ -59,7 +59,7 @@ from verl.utils.metric import (
 from verl.utils.seqlen_balancing import get_seqlen_balanced_partitions, log_seqlen_unbalance
 from verl.utils.torch_functional import masked_mean
 from verl.utils.tracking import ValidationGenerationsLogger
-from verl.utils.file_utils import get_signal
+from verl.utils.file_utils import get_signal, write_jsonl
 from verl.workers.rollout.async_server import AsyncLLMServerManager
 
 WorkerType = Type[Worker]
@@ -859,16 +859,66 @@ class RayPPOTrainer:
             prompt_uid2metric_vals[uid].append(metric_val)
 
         prompt_uid2metric_std = {}
+        prompt_uid2metric_mean = {}
         for prompt_uid, metric_vals in prompt_uid2metric_vals.items():
             prompt_uid2metric_std[prompt_uid] = np.std(metric_vals)
+            prompt_uid2metric_mean[prompt_uid] = np.mean(metric_vals)
 
-        kept_prompt_uids = [uid for uid, std in prompt_uid2metric_std.items() if std > 0 or len(prompt_uid2metric_vals[uid]) == 1]
+        if self.config.algorithm.filter_groups.mode == 'std':
+            kept_prompt_uids = [uid for uid, std in prompt_uid2metric_std.items() if std > 0 or len(prompt_uid2metric_vals[uid]) == 1]
+        elif self.config.algorithm.filter_groups.mode == 'keep_neg':
+            kept_prompt_uids = [uid for uid, std in prompt_uid2metric_std.items() if std > 0 or len(prompt_uid2metric_vals[uid]) == 1 or np.abs(prompt_uid2metric_mean[uid]) < 1e-3]
+        elif self.config.algorithm.filter_groups.mode == 'keep_pos':
+            kept_prompt_uids = [uid for uid, std in prompt_uid2metric_std.items() if std > 0 or len(prompt_uid2metric_vals[uid]) == 1 or np.abs(prompt_uid2metric_mean[uid]) > 0.999]
+        else: # default std>0
+            kept_prompt_uids = [uid for uid, std in prompt_uid2metric_std.items() if std > 0 or len(prompt_uid2metric_vals[uid]) == 1]
 
         kept_traj_idxs = []
+        not_kept_traj_idxs = []
         for idx, traj_from_prompt_uid in enumerate(new_batch.non_tensor_batch["uid"]):
             if traj_from_prompt_uid in kept_prompt_uids:
-                kept_traj_idxs.append(idx)
+                kept_traj_idxs.append((traj_from_prompt_uid, idx))
+            else:
+                not_kept_traj_idxs.append((traj_from_prompt_uid, idx))
+        kept_traj_idxs = [_[1] for _ in sorted(kept_traj_idxs)]
+        # not_kept_traj_idxs = [_[1] for _ in sorted(not_kept_traj_idxs)]
+        # data = new_batch[not_kept_traj_idxs]
 
+        # items = []
+        # for i in range(len(data)):
+        #     data_item = data[i]  # DataProtoItem
+
+        #     prompt_ids = data_item.batch["prompts"]
+
+        #     prompt_length = prompt_ids.shape[-1]
+
+        #     valid_prompt_length = data_item.batch["attention_mask"][:prompt_length].sum()
+        #     valid_prompt_ids = prompt_ids[-valid_prompt_length:]
+
+        #     response_ids = data_item.batch["responses"]
+        #     valid_response_length = data_item.batch["attention_mask"][prompt_length:].sum()
+        #     valid_response_ids = response_ids[:valid_response_length]
+
+        #     # decode
+        #     prompt_str = self.tokenizer.decode(valid_prompt_ids, skip_special_tokens=False)
+        #     response_str = self.tokenizer.decode(valid_response_ids, skip_special_tokens=False)
+            
+        #     ground_truth = data_item.non_tensor_batch["reward_model"]["ground_truth"]
+        #     uuid = data_item.non_tensor_batch["uid"]
+        #     seq_reward = data_item.non_tensor_batch["seq_reward"]
+        #     print(f'seq_reward: {type(seq_reward)}, ground_truth: {type(ground_truth)}, uuid: {type(uuid)}')
+
+        #     item = {
+        #         'global_steps': self.global_steps,
+        #         'uuid': uuid,
+        #         'ground_truth': ground_truth,
+        #         'prompt': prompt_str,
+        #         'response': response_str[-100:],
+        #         'seq_reward': seq_reward.item(),
+        #     }
+        #     items.append(item)
+        
+        # write_jsonl(items, '/cpfs/align/chenliangbo/workspace/test/verl-debug.jsonl', 'a')
         return new_batch[kept_traj_idxs]
         
     def fit(self):
@@ -976,9 +1026,6 @@ class RayPPOTrainer:
                     if self.config.trainer.balance_batch:
                         self._balance_batch(batch, metrics=metrics)
 
-                    # compute global_valid tokens
-                    batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
-
                     with _timer("reward", timing_raw):
                         # compute reward model score
                         if self.use_rm:
@@ -991,14 +1038,24 @@ class RayPPOTrainer:
                             kwargs = {'is_save': self.config.trainer.is_save, 'default_local_dir': self.config.trainer.default_local_dir, 'global_steps': self.global_steps, 'status': 'train'}
                             reward_tensor, reward_extra_infos_dict = compute_reward(batch, self.reward_fn, **kwargs)
 
-                    # apply dynamic sampling
+                    # apply dynamic sampling, please take care the batch order will be changed
                     if self.config.algorithm.filter_groups.enable:
                         assert self.config.reward_model.launch_reward_fn_async == False, "Set launch_reward_fn_async=False while using dynamic sampling"
                         num_gen_batches += 1
                         batch.batch["token_level_scores"] = reward_tensor
                         batch.batch["token_level_rewards"] = reward_tensor
+                        if reward_extra_infos_dict:
+                            batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
+                        
                         batch = self._dynamic_sampling(batch)
                         accumulated_batch = batch if accumulated_batch is None else DataProto.concat([accumulated_batch, batch])
+
+                        assert accumulated_batch.batch.batch_size[0] % self.config.actor_rollout_ref.rollout.n == 0, '====: accumulated_batch_size error'
+                        uids = list(accumulated_batch.non_tensor_batch["uid"])
+                        for ii in range(0, len(uids), self.config.actor_rollout_ref.rollout.n):
+                            uuids = set(uids[ii:ii+self.config.actor_rollout_ref.rollout.n])
+                            assert len(uuids) == 1, '====: accumulated_batch_inner error'
+
                         traj_bsz = self.config.data.train_batch_size * self.config.actor_rollout_ref.rollout.n
                         if accumulated_batch.batch.batch_size[0] < traj_bsz:
                             max_num_gen_batches = self.config.algorithm.filter_groups.max_num_gen_batches
@@ -1010,9 +1067,14 @@ class RayPPOTrainer:
                         else:
                             # Align the batch
                             batch = accumulated_batch[:traj_bsz]
+                            if self.config.trainer.balance_batch:
+                                self._balance_batch(batch, metrics=metrics)
                             metrics["training/dynamic_sampling_num_gen_batches"] = num_gen_batches
-                            accumulated_batch = None
+                            accumulated_batch = accumulated_batch[traj_bsz:] if self.config.algorithm.filter_groups.reuse_accumulated_batch else None
                             num_gen_batches = 0
+
+                    # compute global_valid tokens
+                    batch.meta_info["global_token_num"] = torch.sum(batch.batch["attention_mask"], dim=-1).tolist()
 
                     # recompute old_log_probs
                     with _timer("old_log_prob", timing_raw):
@@ -1043,11 +1105,12 @@ class RayPPOTrainer:
                         reward_extra_infos_dict: dict[str, list]
                         if self.config.reward_model.launch_reward_fn_async:
                             reward_tensor, reward_extra_infos_dict = ray.get(future_reward)
-                        batch.batch["token_level_scores"] = reward_tensor
-
-                        print(f"{list(reward_extra_infos_dict.keys())=}")
-                        if reward_extra_infos_dict:
-                            batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
+                        
+                        if not self.config.algorithm.filter_groups.enable: # batch order changed
+                            batch.batch["token_level_scores"] = reward_tensor
+                            print(f"{list(reward_extra_infos_dict.keys())=}")
+                            if reward_extra_infos_dict:
+                                batch.non_tensor_batch.update({k: np.array(v) for k, v in reward_extra_infos_dict.items()})
 
                         # compute rewards. apply_kl_penalty if available
                         if self.config.algorithm.use_kl_in_reward:

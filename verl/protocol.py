@@ -377,6 +377,25 @@ class DataProto:
             meta_info[DataProtoConfig.auto_padding_key] = True
         return cls(batch=tensor_dict, non_tensor_batch=non_tensors, meta_info=meta_info)
 
+    def to_dict(self):
+
+        def tran_python_type(batch):
+            batch_list = {}
+            for key in batch.keys():
+                value = batch[key]
+                if isinstance(value, np.ndarray):
+                    value = value.tolist()
+                elif isinstance(value, torch.Tensor):
+                    value = value.cpu().numpy().tolist()
+                batch_list[key] = value
+            return batch_list
+        
+        return {
+            'batch': tran_python_type(self.batch),
+            'non_tensor_batch': tran_python_type(self.non_tensor_batch),
+            'meta_info': tran_python_type(self.meta_info)
+        }
+    
     def to(self, device) -> "DataProto":
         """move the batch to device
 

@@ -36,6 +36,8 @@ entropy_coeff=${entropy_coeff:=0}
 clip_ratio_low=${clip_ratio_low:=0.2}
 clip_ratio_high=${clip_ratio_high:=0.2}
 dynamic_sampling_enable=${dynamic_sampling_enable:=False}
+dynamic_sampling_mode=${dynamic_sampling_mode:=std}
+reuse_accumulated_batch=${reuse_accumulated_batch:=False}
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -80,6 +82,8 @@ python3 -m verl.trainer.main_ppo \
     algorithm.filter_groups.enable=${dynamic_sampling_enable} \
     algorithm.filter_groups.metric=seq_reward \
     algorithm.filter_groups.max_num_gen_batches=8 \
+    algorithm.filter_groups.reuse_accumulated_batch=${reuse_accumulated_batch} \
+    algorithm.filter_groups.mode=${dynamic_sampling_mode} \
     trainer.critic_warmup=0 \
     trainer.logger=${logger} \
     trainer.project_name=${project_name} \
