@@ -38,6 +38,9 @@ clip_ratio_high=${clip_ratio_high:=0.2}
 dynamic_sampling_enable=${dynamic_sampling_enable:=False}
 dynamic_sampling_mode=${dynamic_sampling_mode:=std}
 reuse_accumulated_batch=${reuse_accumulated_batch:=False}
+custom_reward_function_train_path=${custom_reward_function_train_path:=null}
+custom_reward_function_train_names=${custom_reward_function_train_names:=compute_score}
+custom_reward_function_train_lower_bound_len=${custom_reward_function_train_lower_bound_len:=0}
 
 python3 -m verl.trainer.main_ppo \
     algorithm.adv_estimator=grpo \
@@ -84,6 +87,9 @@ python3 -m verl.trainer.main_ppo \
     algorithm.filter_groups.max_num_gen_batches=8 \
     algorithm.filter_groups.reuse_accumulated_batch=${reuse_accumulated_batch} \
     algorithm.filter_groups.mode=${dynamic_sampling_mode} \
+    custom_reward_function_train.path=${custom_reward_function_train_path} \
+    custom_reward_function_train.names=${custom_reward_function_train_names} \
+    custom_reward_function_train.reward_kwargs.lower_bound_len=${custom_reward_function_train_lower_bound_len} \
     trainer.critic_warmup=0 \
     trainer.logger=${logger} \
     trainer.project_name=${project_name} \

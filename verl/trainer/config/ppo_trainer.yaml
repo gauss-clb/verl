@@ -204,9 +204,28 @@ reward_model:
   sandbox_fusion:
     url: null # faas url to run code in cloud sandbox
     max_concurrent: 64 # max concurrent requests to sandbox
-custom_reward_function:
+
+custom_reward_function_train:
   path: null
-  name: compute_score
+  names: compute_score
+  reward_kwargs:
+    # cosine_scaled_reward parameters
+    max_value_correct: 1.0
+    min_value_correct: 0.75
+    reward_correct: 0.5
+    lower_bound_len: 0
+    max_len: ${data.max_response_length}
+
+custom_reward_function_validate:
+  path: null
+  names: compute_score
+  reward_kwargs:
+    # cosine_scaled_reward parameters
+    max_value_correct: 1.0
+    min_value_correct: 0.75
+    reward_correct: 0.5
+    lower_bound_len: 0
+    max_len: ${data.max_response_length}
 
 algorithm:
   gamma: 1.0

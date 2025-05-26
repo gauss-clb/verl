@@ -70,6 +70,7 @@ class NaiveRewardManager:
 
             # for rllm reward_fn
             kwargs['eos_token'] = self.tokenizer.eos_token
+            kwargs['gen_len'] = len(valid_response_ids)
             extra_info.update(kwargs)
 
             score = self.compute_score(

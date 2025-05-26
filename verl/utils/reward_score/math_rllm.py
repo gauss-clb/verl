@@ -6,11 +6,9 @@ validate answers when necessary.
 from typing import List, Union
 
 from .reward_types import RewardConfig, RewardFn, RewardInput, RewardOutput, RewardType
-from .math_customed import compute_score
+from .math_check import check_latex
 from ..file_utils import write_jsonl, read_text, read_jsonl, get_signal
 
-import json
-import math
 import os
 import re
 
@@ -52,7 +50,7 @@ class MathVerifyFn(RewardFn):
             return RewardOutput(reward=self.config.unk_error_reward, is_correct=False, extra_info={"ground_truth": "list or tuple"})
 
         ground_truth = str(ground_truth)
-        score = compute_score(model_solution, ground_truth)
+        score = 1.0 if check_latex(model_solution, ground_truth) else 0.0
         if score > 0:
             reward = self.config.correct_reward
             if input.metadata.get("has_toolcall", False):

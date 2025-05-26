@@ -20,9 +20,9 @@ def _default_compute_score(data_source, solution_str, ground_truth, extra_info=N
 
         res = gsm8k.compute_score(solution_str, ground_truth)
     elif data_source in ["lighteval/MATH", "DigitalLearningGmbH/MATH-lighteval"]:
-        from . import math
+        from . import math_func
 
-        res = math.compute_score(solution_str, ground_truth)
+        res = math_func.compute_score(solution_str, ground_truth)
         # [Optional] Math-Verify Integration
         # For enhanced accuracy, consider utilizing Math-Verify (https://github.com/huggingface/Math-Verify).
         # Note: Math-Verify needs to be manually installed via pip: `pip install math-verify`.
